@@ -23,6 +23,8 @@ export class AuthorModelService {
     private disposables: IDisposable[] = [];
     private _selectedText: string = '';
     private _linkToSelectedText: string = '';
+    private _authorsListbyFile = {};
+    private _line = {};
     private gitRepo = {};
     private _userName = '';
     private _userEmail = '';
@@ -115,33 +117,56 @@ export class AuthorModelService {
                     return;
                 }
                 this._isFetchComplete = false;
-                const gitBlame = new GitBlame(repoPath, gitBlameShell);
+                const gitBlame = GitBlame.getInstance(repoPath, gitBlameShell);
                 const fileName = editor!.document.fileName;
                 (this.gitRepo as any)[fileName] = this._repoDir = repoDir;
                 const file = path.relative(repoDir, editor!.document.fileName);
                 this._file = file;
                 this._lineRange = lineRange;
                 gitBlame.getBlameInfo(file).then((info) => {
-                    this.authorsList = [];
-                    for (const lineNumber in info['lines']) {
-                        const hash = info['lines'][lineNumber]['hash'];
-                        const commitInfo = info['commits'][hash];
-                        const newAuthor = {
-                            name: commitInfo.author.name,
-                            email: commitInfo.author.mail,
-                            status: false
-                        };
-                        if (parseInt(lineNumber) >= lineRange[0] && parseInt(lineNumber) <= lineRange[1]) {
-                            newAuthor.status = true;
-                        }
-                        const index = this.authorsList.findIndex(author => author.name === newAuthor.name && author.email === newAuthor.email);
-                        if (index !== -1) {
-                            if (newAuthor.status === true) {
+                    if ((fileName in this._authorsListbyFile)) {
+                        this.authorsList = (this._authorsListbyFile as any)[fileName];
+                        this.authorsList.map(author => author.status = false);
+                        for (const lineNumber in info['lines']) {
+                            const index = (this._line as any)[fileName][lineNumber];
+                            if (parseInt(lineNumber) >= lineRange[0] && parseInt(lineNumber) <= lineRange[1]) {
                                 this.authorsList[index].status = true;
                             }
-                        } else {
-                            this.authorsList.push(newAuthor);
                         }
+                    } else {
+                        (this._line as any)[fileName] = {};
+                        for (const lineNumber in info['lines']) {
+                            const hash = info['lines'][lineNumber]['hash'];
+                            const commitInfo = info['commits'][hash];
+                            const newAuthor = {
+                                name: commitInfo.author.name,
+                                email: commitInfo.author.mail,
+                                status: false
+                            };
+                            if (parseInt(lineNumber) >= lineRange[0] && parseInt(lineNumber) <= lineRange[1]) {
+                                newAuthor.status = true;
+                            }
+                            const index = this.authorsList.findIndex(author => author.name === newAuthor.name && author.email === newAuthor.email);
+                            if (index !== -1) {
+                                if (newAuthor.status === true) {
+                                    this.authorsList[index].status = true;
+                                }
+                            } else {
+                                this.authorsList.push(newAuthor);
+                            }
+                        }
+                        for (const lineNumber in info['lines']) {
+                            const hash = info['lines'][lineNumber]['hash'];
+                            const commitInfo = info['commits'][hash];
+                            const newAuthor = {
+                                name: commitInfo.author.name,
+                                email: commitInfo.author.mail,
+                                status: false
+                            };
+                            const index = this.authorsList.findIndex(author => author.name === newAuthor.name && author.email === newAuthor.email);
+                            (this._line as any)[fileName][lineNumber] = index;
+                        }
+                        (this._authorsListbyFile as any)[fileName] = this.authorsList;
                     }
                     this._onDidAuthorModelChange.fire();
                     // Fetch additional info in background
@@ -151,7 +176,7 @@ export class AuthorModelService {
         });
     }
 
-    private getLineNumberRange(editor: vscode.TextEditor | undefined): number[] | undefined {
+    public getLineNumberRange(editor: vscode.TextEditor | undefined): number[] | undefined {
         if (!editor) {
             return;
         }
